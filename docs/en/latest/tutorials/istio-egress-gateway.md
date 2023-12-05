@@ -50,7 +50,7 @@ helm install apisix apisix/apisix --create-namespace \
   --set ingress-controller.enabled=true \
   --namespace ingress-apisix \
   --set ingress-controller.config.apisix.serviceNamespace=ingress-apisix \
-  --set gateway.tls.enabled=true
+  --set apisix.ssl.enabled=true
 ```
 
 ### Create Test Workload

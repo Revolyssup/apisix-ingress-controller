@@ -43,7 +43,7 @@ ADMIN_API_VERSION=v3
 helm install apisix apisix/apisix -n ingress-apisix \
   --set gateway.type=NodePort \
   --set ingress-controller.enabled=true \
-  --set gateway.tls.enabled=true \
+  --set apisix.ssl.enabled=true \
   --set ingress-controller.config.apisix.serviceNamespace=ingress-apisix \
   --set ingress-controller.config.apisix.adminAPIVersion=$ADMIN_API_VERSION
 ```
