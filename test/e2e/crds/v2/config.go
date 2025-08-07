@@ -52,10 +52,10 @@ spec:
     scope: "Namespace"
 `
 
-func getGatewayProxyYaml(namespace, endpoint, adminKey string) string {
-	return fmt.Sprintf(gatewayProxyYaml, namespace, namespace, endpoint, adminKey)
+func getGatewayProxyYaml(name, namespace, endpoint, adminKey string) string {
+	return fmt.Sprintf(gatewayProxyYaml, name, namespace, endpoint, adminKey)
 }
 
-func getIngressClassYaml(name, controllerName, gatewayProxyNamespace string) string {
-	return fmt.Sprintf(ingressClassYaml, name, controllerName, gatewayProxyNamespace, gatewayProxyNamespace)
+func getIngressClassYaml(name, controllerName, gatewayProxyName, gatewayProxyNamespace string) string {
+	return fmt.Sprintf(ingressClassYaml, name, controllerName, gatewayProxyName, gatewayProxyNamespace)
 }

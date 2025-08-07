@@ -25,6 +25,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gavv/httpexpect/v2"
 	"github.com/gruntwork-io/terratest/modules/k8s"
@@ -39,6 +41,13 @@ import (
 
 const (
 	DefaultControllerName = "apisix.apache.org/apisix-ingress-controller"
+	//CR types
+	Gateway      = "gateway"
+	GatewayClass = "gatewayclass"
+	HTTPRoute    = "httproute"
+	GatewayProxy = "gatewayproxy"
+	Ingress      = "ingress"
+	IngressClass = "ingressclass"
 )
 
 type Options struct {
@@ -70,7 +79,35 @@ type Scaffold struct {
 
 	additionalGateways map[string]*GatewayResources
 
-	Deployer Deployer
+	Deployer           Deployer
+	UniqueNameRegistry *UniqueCRRegistry
+}
+
+// Tests can use UniqueCRRegistry to get a unique name for each CR name to make sure that
+// parallel tests do not interfere with each other.
+// For any given CR, the registry will create a unique name and store it for future use
+type UniqueCRRegistry struct {
+	resourceNameToUniqueResourceName map[string]string
+	mx                               sync.RWMutex
+}
+
+func NewUniqueCRRegistry() *UniqueCRRegistry {
+	return &UniqueCRRegistry{
+		resourceNameToUniqueResourceName: make(map[string]string),
+	}
+}
+
+func (u *UniqueCRRegistry) Get(name string) (uniqueName string) {
+	u.mx.Lock()
+	defer u.mx.Unlock()
+
+	var exists bool
+	uniqueName, exists = u.resourceNameToUniqueResourceName[name]
+	if !exists {
+		uniqueName = fmt.Sprintf("%s-%d", name, time.Now().Nanosecond())
+		u.resourceNameToUniqueResourceName[name] = uniqueName
+	}
+	return
 }
 
 // GatewayResources contains resources associated with a specific Gateway group
@@ -108,7 +145,7 @@ func NewScaffold(o *Options) *Scaffold {
 	}
 
 	s.Deployer = NewDeployer(s)
-
+	s.UniqueNameRegistry = NewUniqueCRRegistry()
 	if !s.opts.SkipHooks {
 		BeforeEach(s.Deployer.BeforeEach)
 		AfterEach(s.Deployer.AfterEach)

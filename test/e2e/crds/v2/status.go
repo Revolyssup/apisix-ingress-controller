@@ -43,13 +43,14 @@ var _ = Describe("Test CRD Status", Label("apisix.apache.org", "v2", "apisixrout
 	Context("Test ApisixRoute Sync Status", func() {
 		BeforeEach(func() {
 			By("create GatewayProxy")
-			gatewayProxy := getGatewayProxyYaml(s.Namespace(), s.Deployer.GetAdminEndpoint(), s.AdminKey())
+			gatewayProxyName := s.UniqueNameRegistry.Get("gateway-proxy")
+			gatewayProxy := getGatewayProxyYaml(s.Namespace(), s.Namespace(), s.Deployer.GetAdminEndpoint(), s.AdminKey())
 			err := s.CreateResourceFromStringWithNamespace(gatewayProxy, s.Namespace())
 			Expect(err).NotTo(HaveOccurred(), "creating GatewayProxy")
 			time.Sleep(5 * time.Second)
 
 			By("create IngressClass")
-			err = s.CreateResourceFromStringWithNamespace(getIngressClassYaml(s.Namespace(), s.GetControllerName(), s.Namespace()), "")
+			err = s.CreateResourceFromStringWithNamespace(getIngressClassYaml(s.Namespace(), s.GetControllerName(), gatewayProxyName, s.Namespace()), "")
 			Expect(err).NotTo(HaveOccurred(), "creating IngressClass")
 			time.Sleep(5 * time.Second)
 		})
@@ -252,7 +253,7 @@ spec:
 `
 		BeforeEach(func() {
 			By("create GatewayProxy")
-			gatewayProxy := getGatewayProxyYaml(s.Namespace(), s.Deployer.GetAdminEndpoint(), s.AdminKey())
+			gatewayProxy := getGatewayProxyYaml(s.Namespace(), s.Namespace(), s.Deployer.GetAdminEndpoint(), s.AdminKey())
 			err := s.CreateResourceFromStringWithNamespace(gatewayProxy, s.Namespace())
 			Expect(err).NotTo(HaveOccurred(), "creating GatewayProxy")
 			time.Sleep(5 * time.Second)

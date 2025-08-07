@@ -43,13 +43,15 @@ var _ = Describe("Test ApisixConsumer", Label("apisix.apache.org", "v2", "apisix
 
 	BeforeEach(func() {
 		By("create GatewayProxy")
-		gatewayProxy := getGatewayProxyYaml(s.Namespace(), s.Deployer.GetAdminEndpoint(), s.AdminKey())
+		gatewayProxyName := s.UniqueNameRegistry.Get(scaffold.GatewayProxy)
+		gatewayProxy := getGatewayProxyYaml(gatewayProxyName, s.Namespace(), s.Deployer.GetAdminEndpoint(), s.AdminKey())
 		err := s.CreateResourceFromStringWithNamespace(gatewayProxy, s.Namespace())
 		Expect(err).NotTo(HaveOccurred(), "creating GatewayProxy")
 		time.Sleep(5 * time.Second)
 
 		By("create IngressClass")
-		err = s.CreateResourceFromStringWithNamespace(getIngressClassYaml(s.Namespace(), s.GetControllerName(), s.Namespace()), "")
+		ingressClassName := s.UniqueNameRegistry.Get(scaffold.IngressClass)
+		err = s.CreateResourceFromStringWithNamespace(getIngressClassYaml(ingressClassName, s.GetControllerName(), gatewayProxyName, s.Namespace()), "")
 		Expect(err).NotTo(HaveOccurred(), "creating IngressClass")
 		time.Sleep(5 * time.Second)
 	})
@@ -60,7 +62,7 @@ var _ = Describe("Test ApisixConsumer", Label("apisix.apache.org", "v2", "apisix
 apiVersion: apisix.apache.org/v2
 kind: ApisixConsumer
 metadata:
-  name: test-consumer
+  name: %s
 spec:
   ingressClassName: %s
   authParameter:
@@ -72,7 +74,7 @@ spec:
 apiVersion: apisix.apache.org/v2
 kind: ApisixRoute
 metadata:
-  name: default
+  name: %s
 spec:
   ingressClassName: %s
   http:
@@ -95,7 +97,7 @@ spec:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: keyauth
+  name: %s
 data:
   # foo-key
   key: Zm9vLWtleQ==
@@ -104,7 +106,7 @@ data:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: keyauth
+  name: %s
 data:
   # foo2-key
   key: Zm9vMi1rZXk=
@@ -113,13 +115,13 @@ data:
 apiVersion: apisix.apache.org/v2
 kind: ApisixConsumer
 metadata:
-  name: test-consumer
+  name: %s
 spec:
   ingressClassName: %s
   authParameter:
     keyAuth:
       secretRef:
-        name: keyauth
+        name: %s
 `
 		)
 		request := func(path string, headers Headers) int {
@@ -128,10 +130,15 @@ spec:
 
 		It("Basic tests", func() {
 			By("apply ApisixRoute")
-			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: "default"}, &apiv2.ApisixRoute{}, fmt.Sprintf(defaultApisixRoute, s.Namespace()))
+			routeName := s.UniqueNameRegistry.Get("default")
+			ingressClassName := s.UniqueNameRegistry.Get(scaffold.IngressClass)
+			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: routeName}, &apiv2.ApisixRoute{},
+				fmt.Sprintf(defaultApisixRoute, routeName, ingressClassName))
 
 			By("apply ApisixConsumer")
-			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: "test-consumer"}, &apiv2.ApisixConsumer{}, fmt.Sprintf(keyAuth, s.Namespace()))
+			consumerName := s.UniqueNameRegistry.Get("test-consumer")
+			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: consumerName}, &apiv2.ApisixConsumer{},
+				fmt.Sprintf(keyAuth, consumerName, ingressClassName))
 
 			By("verify ApisixRoute with ApisixConsumer")
 			Eventually(request).WithArguments("/get", Headers{
@@ -143,30 +150,34 @@ spec:
 			}).WithTimeout(5 * time.Second).ProbeEvery(time.Second).Should(Equal(http.StatusOK))
 
 			By("Delete ApisixConsumer")
-			err := s.DeleteResource("ApisixConsumer", "test-consumer")
+			err := s.DeleteResource("ApisixConsumer", consumerName)
 			Expect(err).ShouldNot(HaveOccurred(), "deleting ApisixConsumer")
 			Eventually(request).WithArguments("/get", Headers{
 				"apikey": "test-key",
 			}).WithTimeout(5 * time.Second).ProbeEvery(time.Second).Should(Equal(http.StatusUnauthorized))
 
 			By("delete ApisixRoute")
-			err = s.DeleteResource("ApisixRoute", "default")
+			err = s.DeleteResource("ApisixRoute", routeName)
 			Expect(err).ShouldNot(HaveOccurred(), "deleting ApisixRoute")
 			Eventually(request).WithArguments("/headers", Headers{}).WithTimeout(5 * time.Second).ProbeEvery(time.Second).Should(Equal(http.StatusNotFound))
 		})
 
 		It("SecretRef tests", func() {
+			routeName := s.UniqueNameRegistry.Get("default")
+			ingressClassName := s.UniqueNameRegistry.Get(scaffold.IngressClass)
 			By("apply ApisixRoute")
-			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: "default"}, &apiv2.ApisixRoute{},
-				fmt.Sprintf(defaultApisixRoute, s.Namespace()))
+			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: routeName}, &apiv2.ApisixRoute{},
+				fmt.Sprintf(defaultApisixRoute, routeName, ingressClassName))
 
 			By("apply Secret")
-			err := s.CreateResourceFromString(secret)
+			secretName := "keyauth"
+			err := s.CreateResourceFromString(fmt.Sprintf(secret, secretName))
 			Expect(err).ShouldNot(HaveOccurred(), "creating Secret for ApisixConsumer")
 
 			By("apply ApisixConsumer")
-			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: "test-consumer"}, &apiv2.ApisixConsumer{},
-				fmt.Sprintf(keyAuthWiwhSecret, s.Namespace()))
+			consumerName := s.UniqueNameRegistry.Get("test-consumer")
+			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: consumerName}, &apiv2.ApisixConsumer{},
+				fmt.Sprintf(keyAuthWiwhSecret, consumerName, ingressClassName, secretName))
 
 			By("verify ApisixRoute with ApisixConsumer")
 			Eventually(request).WithArguments("/get", Headers{
@@ -178,7 +189,7 @@ spec:
 			}).WithTimeout(5 * time.Second).ProbeEvery(time.Second).Should(Equal(http.StatusOK))
 
 			By("update Secret")
-			err = s.CreateResourceFromString(secretUpdated)
+			err = s.CreateResourceFromString(fmt.Sprintf(secretUpdated, secretName))
 			Expect(err).ShouldNot(HaveOccurred(), "updating Secret for ApisixConsumer")
 
 			Eventually(request).WithArguments("/get", Headers{
@@ -190,14 +201,14 @@ spec:
 			}).WithTimeout(5 * time.Second).ProbeEvery(time.Second).Should(Equal(http.StatusOK))
 
 			By("Delete ApisixConsumer")
-			err = s.DeleteResource("ApisixConsumer", "test-consumer")
+			err = s.DeleteResource("ApisixConsumer", consumerName)
 			Expect(err).ShouldNot(HaveOccurred(), "deleting ApisixConsumer")
 			Eventually(request).WithArguments("/get", Headers{
 				"apikey": "test-key",
 			}).WithTimeout(5 * time.Second).ProbeEvery(time.Second).Should(Equal(http.StatusUnauthorized))
 
 			By("delete ApisixRoute")
-			err = s.DeleteResource("ApisixRoute", "default")
+			err = s.DeleteResource("ApisixRoute", routeName)
 			Expect(err).ShouldNot(HaveOccurred(), "deleting ApisixRoute")
 			Eventually(request).WithArguments("/headers", Headers{}).WithTimeout(5 * time.Second).ProbeEvery(time.Second).Should(Equal(http.StatusNotFound))
 		})
@@ -209,7 +220,7 @@ spec:
 apiVersion: apisix.apache.org/v2
 kind: ApisixConsumer
 metadata:
-  name: test-consumer
+  name: %s
 spec:
   ingressClassName: %s
   authParameter:
@@ -222,7 +233,7 @@ spec:
 apiVersion: apisix.apache.org/v2
 kind: ApisixRoute
 metadata:
-  name: default
+  name: %s
 spec:
   ingressClassName: %s
   http:
@@ -267,7 +278,7 @@ data:
 apiVersion: apisix.apache.org/v2
 kind: ApisixConsumer
 metadata:
-  name: test-consumer
+  name: %s
 spec:
   ingressClassName: %s
   authParameter:
@@ -278,11 +289,16 @@ spec:
 		)
 
 		It("Basic tests", func() {
+			ingressClassName := s.UniqueNameRegistry.Get(scaffold.IngressClass)
 			By("apply ApisixRoute")
-			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: "default"}, &apiv2.ApisixRoute{}, fmt.Sprintf(defaultApisixRoute, s.Namespace()))
+			routeName := s.UniqueNameRegistry.Get("default")
+			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: routeName},
+				&apiv2.ApisixRoute{}, fmt.Sprintf(defaultApisixRoute, routeName, ingressClassName))
 
 			By("apply ApisixConsumer")
-			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: "test-consumer"}, &apiv2.ApisixConsumer{}, fmt.Sprintf(basicAuth, s.Namespace()))
+			consumerName := s.UniqueNameRegistry.Get("test-consumer")
+			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: consumerName},
+				&apiv2.ApisixConsumer{}, fmt.Sprintf(basicAuth, consumerName, ingressClassName))
 
 			By("verify ApisixRoute with ApisixConsumer")
 			s.RequestAssert(&scaffold.RequestAssert{
@@ -307,7 +323,7 @@ spec:
 			})
 
 			By("Delete ApisixConsumer")
-			err := s.DeleteResource("ApisixConsumer", "test-consumer")
+			err := s.DeleteResource("ApisixConsumer", consumerName)
 			Expect(err).ShouldNot(HaveOccurred(), "deleting ApisixConsumer")
 			s.RequestAssert(&scaffold.RequestAssert{
 				Method: "GET",
@@ -321,7 +337,7 @@ spec:
 			})
 
 			By("delete ApisixRoute")
-			err = s.DeleteResource("ApisixRoute", "default")
+			err = s.DeleteResource("ApisixRoute", routeName)
 			Expect(err).ShouldNot(HaveOccurred(), "deleting ApisixRoute")
 			s.RequestAssert(&scaffold.RequestAssert{
 				Method: "GET",
@@ -332,17 +348,20 @@ spec:
 		})
 
 		It("SecretRef tests", func() {
+			ingressClassName := s.UniqueNameRegistry.Get(scaffold.IngressClass)
 			By("apply ApisixRoute")
-			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: "default"}, &apiv2.ApisixRoute{},
-				fmt.Sprintf(defaultApisixRoute, s.Namespace()))
+			routeName := s.UniqueNameRegistry.Get("default")
+			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: routeName}, &apiv2.ApisixRoute{},
+				fmt.Sprintf(defaultApisixRoute, routeName, ingressClassName))
 
 			By("apply Secret")
 			err := s.CreateResourceFromString(secret)
 			Expect(err).ShouldNot(HaveOccurred(), "creating Secret for ApisixConsumer")
 
 			By("apply ApisixConsumer")
-			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: "test-consumer"},
-				&apiv2.ApisixConsumer{}, fmt.Sprintf(basicAuthWithSecret, s.Namespace()))
+			consumerName := s.UniqueNameRegistry.Get("test-consumer")
+			applier.MustApplyAPIv2(types.NamespacedName{Namespace: s.Namespace(), Name: consumerName},
+				&apiv2.ApisixConsumer{}, fmt.Sprintf(basicAuthWithSecret, consumerName, ingressClassName))
 
 			By("verify ApisixRoute with ApisixConsumer")
 			s.RequestAssert(&scaffold.RequestAssert{
@@ -387,7 +406,7 @@ spec:
 			})
 
 			By("Delete ApisixConsumer")
-			err = s.DeleteResource("ApisixConsumer", "test-consumer")
+			err = s.DeleteResource("ApisixConsumer", consumerName)
 			Expect(err).ShouldNot(HaveOccurred(), "deleting ApisixConsumer")
 			s.RequestAssert(&scaffold.RequestAssert{
 				Method: "GET",
@@ -401,7 +420,7 @@ spec:
 			})
 
 			By("delete ApisixRoute")
-			err = s.DeleteResource("ApisixRoute", "default")
+			err = s.DeleteResource("ApisixRoute", routeName)
 			Expect(err).ShouldNot(HaveOccurred(), "deleting ApisixRoute")
 			s.RequestAssert(&scaffold.RequestAssert{
 				Method: "GET",
