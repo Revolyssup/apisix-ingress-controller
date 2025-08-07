@@ -37,7 +37,7 @@ var _ = Describe("Test GlobalRule", Label("apisix.apache.org", "v2", "apisixglob
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: test-ingress
+  name: %s
 spec:
   ingressClassName: %s
   rules:
@@ -56,18 +56,21 @@ spec:
 	Context("ApisixGlobalRule Basic Operations", func() {
 		BeforeEach(func() {
 			By("create GatewayProxy")
-			gatewayProxy := getGatewayProxyYaml(s.Namespace(), s.Deployer.GetAdminEndpoint(), s.AdminKey())
+			gatewayProxyName := s.UniqueNameRegistry.Get(scaffold.GatewayProxy)
+			gatewayProxy := getGatewayProxyYaml(gatewayProxyName, s.Namespace(), s.Deployer.GetAdminEndpoint(), s.AdminKey())
 			err := s.CreateResourceFromStringWithNamespace(gatewayProxy, s.Namespace())
 			Expect(err).NotTo(HaveOccurred(), "creating GatewayProxy")
 			time.Sleep(5 * time.Second)
 
 			By("create IngressClass")
-			err = s.CreateResourceFromStringWithNamespace(getIngressClassYaml(s.Namespace(), s.GetControllerName(), s.Namespace()), "")
+			ingressClassName := s.UniqueNameRegistry.Get(scaffold.IngressClass)
+			err = s.CreateResourceFromStringWithNamespace(getIngressClassYaml(ingressClassName, s.GetControllerName(), gatewayProxyName, s.Namespace()), "")
 			Expect(err).NotTo(HaveOccurred(), "creating IngressClass")
 			time.Sleep(5 * time.Second)
 
 			By("create Ingress")
-			err = s.CreateResourceFromStringWithNamespace(fmt.Sprintf(ingressYaml, s.Namespace()), s.Namespace())
+			ingressName := s.UniqueNameRegistry.Get(scaffold.Ingress)
+			err = s.CreateResourceFromStringWithNamespace(fmt.Sprintf(ingressYaml, ingressName, ingressClassName), s.Namespace())
 			Expect(err).NotTo(HaveOccurred(), "creating Ingress")
 			time.Sleep(5 * time.Second)
 
@@ -82,11 +85,12 @@ spec:
 		})
 
 		It("Test GlobalRule with response-rewrite plugin", func() {
+			ingressClassName := s.UniqueNameRegistry.Get(scaffold.IngressClass)
 			globalRuleYaml := `
 apiVersion: apisix.apache.org/v2
 kind: ApisixGlobalRule
 metadata:
-  name: test-global-rule-response-rewrite
+  name: %s
 spec:
   ingressClassName: %s
   plugins:
@@ -99,12 +103,13 @@ spec:
 `
 
 			By("create ApisixGlobalRule with response-rewrite plugin")
-			err := s.CreateResourceFromStringWithNamespace(fmt.Sprintf(globalRuleYaml, s.Namespace()), s.Namespace())
+			globalRuleName := s.UniqueNameRegistry.Get("test-global-rule-response-rewrite")
+			err := s.CreateResourceFromString(fmt.Sprintf(globalRuleYaml, globalRuleName, ingressClassName))
 			Expect(err).NotTo(HaveOccurred(), "creating ApisixGlobalRule")
 
 			By("verify ApisixGlobalRule status condition")
 			time.Sleep(5 * time.Second)
-			gryaml, err := s.GetResourceYaml("ApisixGlobalRule", "test-global-rule-response-rewrite")
+			gryaml, err := s.GetResourceYaml("ApisixGlobalRule", globalRuleName)
 			Expect(err).NotTo(HaveOccurred(), "getting ApisixGlobalRule yaml")
 			Expect(gryaml).To(ContainSubstring(`status: "True"`))
 			Expect(gryaml).To(ContainSubstring("message: The global rule has been accepted and synced to APISIX"))
@@ -119,7 +124,7 @@ spec:
 			resp.Header("X-Global-Test").IsEqual("enabled")
 
 			By("delete ApisixGlobalRule")
-			err = s.DeleteResource("ApisixGlobalRule", "test-global-rule-response-rewrite")
+			err = s.DeleteResource("ApisixGlobalRule", globalRuleName)
 			Expect(err).NotTo(HaveOccurred(), "deleting ApisixGlobalRule")
 			time.Sleep(5 * time.Second)
 
@@ -134,11 +139,13 @@ spec:
 		})
 
 		It("Test GlobalRule update", func() {
+			globalRuleName := s.UniqueNameRegistry.Get("test-global-rule-update")
+			ingressClassName := s.UniqueNameRegistry.Get(scaffold.IngressClass)
 			globalRuleYaml := `
 apiVersion: apisix.apache.org/v2
 kind: ApisixGlobalRule
 metadata:
-  name: test-global-rule-update
+  name: %s
 spec:
   ingressClassName: %s
   plugins:
@@ -153,7 +160,7 @@ spec:
 apiVersion: apisix.apache.org/v2
 kind: ApisixGlobalRule
 metadata:
-  name: test-global-rule-update
+  name: %s
 spec:
   ingressClassName: %s
   plugins:
@@ -166,12 +173,12 @@ spec:
 `
 
 			By("create initial ApisixGlobalRule")
-			err := s.CreateResourceFromStringWithNamespace(fmt.Sprintf(globalRuleYaml, s.Namespace()), s.Namespace())
+			err := s.CreateResourceFromString(fmt.Sprintf(globalRuleYaml, globalRuleName, ingressClassName))
 			Expect(err).NotTo(HaveOccurred(), "creating ApisixGlobalRule")
 
 			By("verify initial ApisixGlobalRule status condition")
 			time.Sleep(5 * time.Second)
-			gryaml, err := s.GetResourceYaml("ApisixGlobalRule", "test-global-rule-update")
+			gryaml, err := s.GetResourceYaml("ApisixGlobalRule", globalRuleName)
 			Expect(err).NotTo(HaveOccurred(), "getting ApisixGlobalRule yaml")
 			Expect(gryaml).To(ContainSubstring(`status: "True"`))
 			Expect(gryaml).To(ContainSubstring("message: The global rule has been accepted and synced to APISIX"))
@@ -186,12 +193,12 @@ spec:
 			resp.Header("X-New-Header").IsEmpty()
 
 			By("update ApisixGlobalRule")
-			err = s.CreateResourceFromStringWithNamespace(fmt.Sprintf(updatedGlobalRuleYaml, s.Namespace()), s.Namespace())
+			err = s.CreateResourceFromString(fmt.Sprintf(updatedGlobalRuleYaml, globalRuleName, ingressClassName))
 			Expect(err).NotTo(HaveOccurred(), "updating ApisixGlobalRule")
 
 			By("verify updated ApisixGlobalRule status condition")
 			time.Sleep(5 * time.Second)
-			gryaml, err = s.GetResourceYaml("ApisixGlobalRule", "test-global-rule-update")
+			gryaml, err = s.GetResourceYaml("ApisixGlobalRule", globalRuleName)
 			Expect(err).NotTo(HaveOccurred(), "getting updated ApisixGlobalRule yaml")
 			Expect(gryaml).To(ContainSubstring(`status: "True"`))
 			Expect(gryaml).To(ContainSubstring("message: The global rule has been accepted and synced to APISIX"))
@@ -207,16 +214,17 @@ spec:
 			resp.Header("X-New-Header").IsEqual("added")
 
 			By("delete ApisixGlobalRule")
-			err = s.DeleteResource("ApisixGlobalRule", "test-global-rule-update")
+			err = s.DeleteResource("ApisixGlobalRule", globalRuleName)
 			Expect(err).NotTo(HaveOccurred(), "deleting ApisixGlobalRule")
 		})
 
 		It("Test multiple GlobalRules with different plugins", func() {
+			ingressClassName := s.UniqueNameRegistry.Get(scaffold.IngressClass)
 			proxyRewriteGlobalRuleYaml := `
 apiVersion: apisix.apache.org/v2
 kind: ApisixGlobalRule
 metadata:
-  name: test-global-rule-proxy-rewrite
+  name: %s
 spec:
   ingressClassName: %s
   plugins:
@@ -232,7 +240,7 @@ spec:
 apiVersion: apisix.apache.org/v2
 kind: ApisixGlobalRule
 metadata:
-  name: test-global-rule-response-rewrite-multi
+  name: %s
 spec:
   ingressClassName: %s
   plugins:
@@ -244,23 +252,25 @@ spec:
         X-Response-Type: "rewrite"
 `
 
+			globalRuleNameResponseRewrite := s.UniqueNameRegistry.Get("test-global-rule-response-rewrite-multi")
+			globalRuleNameProxyRewrite := s.UniqueNameRegistry.Get("test-global-rule-proxy-rewrite")
 			By("create ApisixGlobalRule with proxy-rewrite plugin")
-			err := s.CreateResourceFromStringWithNamespace(fmt.Sprintf(proxyRewriteGlobalRuleYaml, s.Namespace()), s.Namespace())
+			err := s.CreateResourceFromString(fmt.Sprintf(proxyRewriteGlobalRuleYaml, globalRuleNameProxyRewrite, ingressClassName))
 			Expect(err).NotTo(HaveOccurred(), "creating ApisixGlobalRule with proxy-rewrite")
 
 			By("create ApisixGlobalRule with response-rewrite plugin")
-			err = s.CreateResourceFromStringWithNamespace(fmt.Sprintf(responseRewriteGlobalRuleYaml, s.Namespace()), s.Namespace())
+			err = s.CreateResourceFromStringWithNamespace(fmt.Sprintf(responseRewriteGlobalRuleYaml, globalRuleNameResponseRewrite, ingressClassName), s.Namespace())
 			Expect(err).NotTo(HaveOccurred(), "creating ApisixGlobalRule with response-rewrite")
 
 			By("verify both ApisixGlobalRule status conditions")
 			time.Sleep(5 * time.Second)
 
-			proxyRewriteYaml, err := s.GetResourceYaml("ApisixGlobalRule", "test-global-rule-proxy-rewrite")
+			proxyRewriteYaml, err := s.GetResourceYaml("ApisixGlobalRule", globalRuleNameProxyRewrite)
 			Expect(err).NotTo(HaveOccurred(), "getting proxy-rewrite ApisixGlobalRule yaml")
 			Expect(proxyRewriteYaml).To(ContainSubstring(`status: "True"`))
 			Expect(proxyRewriteYaml).To(ContainSubstring("message: The global rule has been accepted and synced to APISIX"))
 
-			responseRewriteYaml, err := s.GetResourceYaml("ApisixGlobalRule", "test-global-rule-response-rewrite-multi")
+			responseRewriteYaml, err := s.GetResourceYaml("ApisixGlobalRule", globalRuleNameResponseRewrite)
 			Expect(err).NotTo(HaveOccurred(), "getting response-rewrite ApisixGlobalRule yaml")
 			Expect(responseRewriteYaml).To(ContainSubstring(`status: "True"`))
 			Expect(responseRewriteYaml).To(ContainSubstring("message: The global rule has been accepted and synced to APISIX"))
@@ -276,7 +286,7 @@ spec:
 			getResp.Body().Contains(`"X-Global-Proxy": "test"`)
 
 			By("delete proxy-rewrite ApisixGlobalRule")
-			err = s.DeleteResource("ApisixGlobalRule", "test-global-rule-proxy-rewrite")
+			err = s.DeleteResource("ApisixGlobalRule", globalRuleNameProxyRewrite)
 			Expect(err).NotTo(HaveOccurred(), "deleting proxy-rewrite ApisixGlobalRule")
 			time.Sleep(5 * time.Second)
 
@@ -291,7 +301,7 @@ spec:
 			getRespAfterProxyDelete.Body().NotContains(`"X-Global-Proxy": "test"`)
 
 			By("delete response-rewrite ApisixGlobalRule")
-			err = s.DeleteResource("ApisixGlobalRule", "test-global-rule-response-rewrite-multi")
+			err = s.DeleteResource("ApisixGlobalRule", globalRuleNameResponseRewrite)
 			Expect(err).NotTo(HaveOccurred(), "deleting response-rewrite ApisixGlobalRule")
 			time.Sleep(5 * time.Second)
 
